@@ -1,0 +1,20 @@
+# Ready-built release: pulls the published image; no source checkout needed.
+# No volume: the server keeps nothing on disk.
+name: telegram-mcp
+services:
+  app:
+    image: ${TELEGRAM_MCP_IMAGE:-ghcr.io/gothenburgoffice/telegram-mcp:latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${APP_PORT:-3440}:8000"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?Set PUBLIC_HOST in .env}
+      MCP_TOKENS: ${MCP_TOKENS:?Set MCP_TOKENS in .env}
+      RATE_PER_MINUTE: ${RATE_PER_MINUTE:-30}
+      RATE_PER_DAY: ${RATE_PER_DAY:-1000}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-15}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true

@@ -1,8 +1,9 @@
 # telegram-mcp
 
 A remote MCP server that sends and reads Telegram bot messages for one chat per connection. Read
-[README.md](README.md) first. Server operations (Caddy, update scripts) live in the private
-`GothenburgOffice/hosting-debian-vps` repo, not here.
+[README.md](README.md) first. It is self-hosted: the README documents installing the published
+image, and no hosted instance is advertised here. Operations for our own server live in a
+separate private repository, not here.
 
 - Store nothing: no bot tokens, chat IDs, messages or files on disk or in logs. The bot token is in
   every Bot API URL, so never put a URL, a urllib exception text or the token into an error.

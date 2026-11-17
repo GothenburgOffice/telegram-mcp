@@ -442,7 +442,7 @@ MCP_ALIAS_MAX = 128
 
 def _canonical(scope):
     path = scope.get('path', '')
-    if (len(path) <= MCP_ALIAS_MAX and MCP_ALIAS.fullmatch(path)
+    if (len(path[5:].rstrip('/')) <= MCP_ALIAS_MAX and MCP_ALIAS.fullmatch(path)
             and not any(part in ('.', '..') for part in path.split('/'))):
         return dict(scope, path='/mcp', raw_path=b'/mcp')
     return scope

@@ -4,8 +4,8 @@ A remote MCP server (streamable HTTP) that lets Claude, or any MCP client, send 
 and files to **one Telegram chat** through **your own bot**, and read the replies. It works in
 every Claude surface through a custom connector.
 
-Hosted at `https://telegrammcp.gothenburgoffice.se/mcp`; access needs an MCP token from the
-operator. You can also run it yourself (below).
+You run it yourself: a ready-built image is published on GHCR (see [Install](#install)). Only
+you can use your server, because every request needs an MCP token you set in its `.env`.
 
 ## What it stores: nothing
 
@@ -18,13 +18,13 @@ operator. You can also run it yourself (below).
   only the chat in the `x-application-id` header. Replies from other chats are never returned.
 
 Sending Telegram messages costs nothing, so the server is not an open relay: every request needs
-one of the operator's MCP tokens.
+one of the MCP tokens from the server's `.env`.
 
 ## Headers
 
 | Header | Value |
 |---|---|
-| `x-client-secret` | An MCP token of this server (or `Authorization: Bearer <token>`) |
+| `x-client-secret` | One of the server's `MCP_TOKENS` (or `Authorization: Bearer <token>`) |
 | `x-application-key` | Your bot token from [@BotFather](https://t.me/BotFather), like `123456789:AA...` |
 | `x-application-id` | The chat ID: your user ID for a private chat, a negative ID for a group, or `@channelname` |
 
@@ -42,12 +42,13 @@ one of the operator's MCP tokens.
 ## Connect a client
 
 **Claude (claude.ai, Desktop, mobile):** Settings → Connectors → Add custom connector. URL
-`https://telegrammcp.gothenburgoffice.se/mcp`, and the three headers above.
+`https://<your host>/mcp`, and the three headers above. Connectors reach your server from the
+internet, so it needs a public HTTPS address.
 
 **Claude Code:**
 
 ```sh
-claude mcp add --transport http telegram https://telegrammcp.gothenburgoffice.se/mcp \
+claude mcp add --transport http telegram https://<your host>/mcp \
   --header "x-client-secret: <MCP token>" \
   --header "x-application-key: <bot token>" \
   --header "x-application-id: <chat ID>"
@@ -65,27 +66,80 @@ claude mcp add --transport http telegram https://telegrammcp.gothenburgoffice.se
 
 To ask and wait: `send_message`, then `get_replies` with `wait_seconds: 50`, repeated as needed.
 
-## Run it yourself
+## Install
+
+The CI publishes the image after the tests and an image health check pass on `main`:
+`ghcr.io/gothenburgoffice/telegram-mcp:sha-<commit>` for each commit, and `:latest`. Pinning a
+`sha-` tag means an update happens only when you choose it. The commit is the full 40-character
+sha of a `main` commit whose **Verify** run passed (Actions tab; the run summary names the image).
+
+You need Docker with Compose on a machine with a public HTTPS address, or only on your own machine
+if you use it from Claude Code there (see [Local only](#local-only)).
 
 ```sh
-cp .env.example .env    # set PUBLIC_HOST and MCP_TOKENS (openssl rand -hex 32)
+mkdir telegram-mcp && cd telegram-mcp
+sha=<40-character commit>    # a main commit whose Verify run passed
+base=https://raw.githubusercontent.com/gothenburgoffice/telegram-mcp/$sha
+
+# The compose file and the settings template, from that same commit
+curl -fsSL -o compose.images.yaml "$base/compose.images.yaml"
+curl -fsSL -o .env "$base/.env.example"
+chmod 600 .env
+
+# Fill in .env: your host name, one MCP token, and the pinned image
+sed -i   -e "s|^PUBLIC_HOST=.*|PUBLIC_HOST=telegram.example.com|"   -e "s|^MCP_TOKENS=.*|MCP_TOKENS=$(openssl rand -hex 32)|"   -e "s|^TELEGRAM_MCP_IMAGE=.*|TELEGRAM_MCP_IMAGE=ghcr.io/gothenburgoffice/telegram-mcp:sha-$sha|"   .env
+grep ^MCP_TOKENS= .env       # copy this token into your password manager and your connector
+
 docker compose -f compose.images.yaml up -d
-curl -fsS http://127.0.0.1:3440/health
+curl -fsS http://127.0.0.1:3440/health                                       # {"status":"ok",...,"configured":true}
+curl -s -o /dev/null -w '%{http_code}
+' -X POST http://127.0.0.1:3440/mcp   # 401: no token, as it should be
 ```
 
-Put it behind an HTTPS reverse proxy. `MCP_TOKENS` takes several comma-separated tokens, so each
-person or device can have its own and you can revoke one by removing it.
+The container listens only on `127.0.0.1:3440` (`APP_PORT`). Put an HTTPS reverse proxy in front
+of it. With [Caddy](https://caddyserver.com), which gets the certificate itself:
+
+```
+telegram.example.com {
+	request_body {
+		max_size 25MB
+	}
+	reverse_proxy 127.0.0.1:3440
+}
+```
+
+Leave access logging off in the proxy: requests carry your bot token in a header, and access logs
+record headers.
+
+**Update:** set `TELEGRAM_MCP_IMAGE` in `.env` to the new `sha-` tag, download that commit's
+`compose.images.yaml` again, and run `docker compose -f compose.images.yaml up -d`.
+
+**Tokens:** `MCP_TOKENS` takes several comma-separated tokens, so each person or device can have
+its own. To revoke one, remove it from `.env` and run `docker compose -f compose.images.yaml up -d`.
+
+### Local only
+
+To use it only from Claude Code on the same machine, skip the proxy. Set `PUBLIC_HOST` to
+`localhost` and connect to `http://127.0.0.1:3440/mcp`. Claude's custom connectors (claude.ai,
+Desktop, mobile) can't reach a local address.
+
+### Without Compose
+
+```sh
+docker run -d --name telegram-mcp --restart unless-stopped --read-only --tmpfs /tmp   --security-opt no-new-privileges:true -p 127.0.0.1:3440:8000   -e PUBLIC_HOST=telegram.example.com -e MCP_TOKENS=<token>   ghcr.io/gothenburgoffice/telegram-mcp:sha-<commit>
+```
+
+### Settings
 
 | Variable | Default | |
 |---|---|---|
 | `PUBLIC_HOST` | (required) | The public host name, for the DNS-rebinding check |
 | `MCP_TOKENS` | (required) | Comma-separated tokens; `/mcp` answers 401 without one, 503 if none is set |
+| `APP_PORT` | 3440 | Host port on `127.0.0.1` (Compose only) |
 | `RATE_PER_MINUTE` / `RATE_PER_DAY` | 30 / 1000 | Sends per MCP token (each message part or file counts) |
 | `MAX_UPLOAD_MB` | 15 | Largest data: URL or base64 file the server forwards |
+| `TELEGRAM_MCP_IMAGE` | `:latest` | The image Compose runs; pin a `sha-` tag |
 | `TELEGRAM_API_BASE` | `https://api.telegram.org` | For tests or a local Bot API server |
-
-The CI publishes `ghcr.io/gothenburgoffice/telegram-mcp:sha-<commit>` and `:latest` after the
-tests and an image health check pass on `main`.
 
 ## Develop
 

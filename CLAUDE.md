@@ -1,6 +1,13 @@
 # telegram-mcp
 
-<!-- What this repository is, how to run it, and its conventions go here. -->
+A remote MCP server that sends and reads Telegram bot messages for one chat per connection. Read
+[README.md](README.md) first. Server operations (Caddy, update scripts) live in the private
+`GothenburgOffice/hosting-debian-vps` repo, not here.
+
+- Store nothing: no bot tokens, chat IDs, messages or files on disk or in logs. The bot token is in
+  every Bot API URL, so never put a URL, a urllib exception text or the token into an error.
+- Tools never take a chat ID argument: the chat comes only from the `x-application-id` header.
+- Tests are offline (`python -m pytest -q tests`, a stub Bot API); keep them that way.
 
 ## Branches and pull requests
 

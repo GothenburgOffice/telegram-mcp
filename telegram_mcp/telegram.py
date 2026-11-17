@@ -18,7 +18,7 @@ import uuid
 API = os.environ.get('TELEGRAM_API_BASE', 'https://api.telegram.org').rstrip('/')
 TOKEN_RE = re.compile(r'^\d{3,20}:[A-Za-z0-9_-]{30,64}$')
 CHAT_RE = re.compile(r'^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{3,31})$')
-TEXT_LIMIT = 4000       # Telegram allows 4096 characters; keep a margin for how it counts them
+TEXT_LIMIT = 4096       # per message, in UTF-16 code units after markup is parsed (an emoji is 2)
 CAPTION_LIMIT = 1024
 MAX_UPLOAD_BYTES = int(os.environ.get('MAX_UPLOAD_MB', '15')) * 1024 * 1024
 
@@ -145,15 +145,31 @@ def load_file(spec: str) -> str | tuple[bytes, str | None]:
     return data, mime
 
 
+def tg_len(text: str) -> int:
+    """Length as Telegram counts it: UTF-16 code units (characters outside the BMP, like emoji, are 2)."""
+    return len(text.encode('utf-16-le')) // 2
+
+
+def fit(text: str, limit: int) -> int:
+    """The number of leading characters of text whose Telegram length is at most limit."""
+    units = 0
+    for i, ch in enumerate(text):
+        units += 2 if ord(ch) > 0xFFFF else 1
+        if units > limit:
+            return i
+    return len(text)
+
+
 def split_text(text: str, limit: int = TEXT_LIMIT) -> list[str]:
     """Split a long message at line breaks (else spaces) into parts Telegram accepts."""
     parts = []
-    while len(text) > limit:
-        cut = text.rfind('\n', 0, limit)
-        if cut < limit // 2:
-            cut = text.rfind(' ', 0, limit)
-        if cut < limit // 2:
-            cut = limit
+    while tg_len(text) > limit:
+        end = fit(text, limit)
+        cut = text.rfind('\n', 0, end)
+        if cut < end // 2:
+            cut = text.rfind(' ', 0, end)
+        if cut < end // 2:
+            cut = end
         parts.append(text[:cut])
         text = text[cut:].lstrip('\n')
     parts.append(text)

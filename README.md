@@ -57,7 +57,7 @@ claude mcp add --transport http telegram https://telegrammcp.gothenburgoffice.se
 
 | Tool | What it does |
 |---|---|
-| `send_message` | Text, `format` plain / html / markdown, `silent`, `reply_to_message_id`, `link_preview`. Long text is split at line breaks. Markup Telegram can't parse is sent as plain text, and the reply says so |
+| `send_message` | Text, `format` plain / html / markdown, `silent`, `reply_to_message_id`, `link_preview`. Text over Telegram's 4096-character limit (counted in UTF-16, so an emoji is 2) is sent as a file (`.txt`, `.html` or `.md`) with its first line as the caption; `long_text: "split"` sends several messages instead. Markup Telegram can't parse is sent as plain text, and the reply says so |
 | `send_photo` | A photo from an https URL (Telegram fetches it, up to 5 MB), a data: URL or base64 (up to 15 MB), with an optional caption |
 | `send_document` | Any file, kept as is: https URL (up to 20 MB), data: URL or base64 (up to 15 MB), with a file name and caption |
 | `get_replies` | New messages in the chat (text, captions, and the type of other messages; file contents are not fetched). `wait_seconds` (up to 50) waits for a reply; `mark_read=false` peeks |

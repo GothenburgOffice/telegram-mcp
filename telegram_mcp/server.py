@@ -171,17 +171,53 @@ Format = Annotated[Literal['plain', 'html', 'markdown'],
 Silent = Annotated[bool, Field(description='Deliver without a notification sound')]
 
 
-@mcp.tool(description="""Send a text message to the connection's Telegram chat. Text longer than one Telegram
-message (4096 characters) is split at line breaks and sent as several messages. Returns the message IDs.""")
+LONG_EXT = {'plain': 'txt', 'html': 'html', 'markdown': 'md'}
+LONG_MIME = {'txt': 'text/plain; charset=utf-8', 'html': 'text/html; charset=utf-8', 'md': 'text/markdown; charset=utf-8'}
+
+
+async def _send_long_as_document(ctx: Context, token: str, chat: str, text: str, format: str, silent: bool,
+                                 reply_to_message_id: int | None, filename: str | None) -> list[TextContent]:
+    _rate(ctx)
+    ext = LONG_EXT[format]
+    name = tg.safe_filename(filename, f'message.{ext}')
+    if '.' not in name:
+        name += f'.{ext}'
+    first = next((line.strip() for line in text.splitlines() if line.strip()), '')
+    caption = (first if tg.tg_len(first) <= 200 else first[:tg.fit(first, 199)] + '…') + \
+        f'\n\n(Full text in the file, {len(text)} characters.)'
+    params = {'chat_id': chat, 'caption': caption, 'disable_notification': silent or None}
+    if reply_to_message_id:
+        params['reply_parameters'] = json.dumps({'message_id': reply_to_message_id, 'allow_sending_without_reply': True})
+    msg = await _call(token, 'sendDocument', params,
+                      files={'document': (name, text.encode('utf-8'), LONG_MIME[ext])}, timeout=120)
+    return [_text({'sent': [_sent(msg)], 'sent_as': 'document', 'file_name': name,
+                   'note': f'The text is longer than one Telegram message ({tg.TEXT_LIMIT} characters), so it was '
+                           'sent as a file. Pass long_text="split" to send it as several messages instead.'})]
+
+
+@mcp.tool(description="""Send a text message to the connection's Telegram chat. Telegram allows 4096 characters
+per message (counted in UTF-16, so an emoji counts as 2). Longer text is sent as a file (.txt, or .html / .md
+for those formats) with its first line as the caption; long_text="split" sends it as several messages split
+at line breaks instead. Returns the message IDs.""")
 async def send_message(
     ctx: Context,
-    text: Annotated[str, Field(description='The message text', min_length=1, max_length=40000)],
+    text: Annotated[str, Field(description='The message text', min_length=1, max_length=1_000_000)],
     format: Format = 'plain',
     silent: Silent = False,
     reply_to_message_id: Annotated[int | None, Field(description='Answer this message in the chat')] = None,
     link_preview: Annotated[bool, Field(description='Show a preview for the first link')] = True,
+    long_text: Annotated[Literal['document', 'split'],
+                         Field(description='Text over the limit: send it as a file (default) or split it '
+                                           '(up to 40000 characters)')] = 'document',
+    filename: Annotated[str | None, Field(description='File name when long text is sent as a file')] = None,
 ) -> list[TextContent]:
     token, chat = _bot(ctx), _chat(ctx)
+    if tg.tg_len(text) > tg.TEXT_LIMIT:
+        if long_text == 'document':
+            return await _send_long_as_document(ctx, token, chat, text, format, silent, reply_to_message_id, filename)
+        if len(text) > 40000:
+            raise ToolError('Too long to split (over 40000 characters, more than 10 messages). '
+                            'Use long_text="document".')
     parts = tg.split_text(text)
     _rate(ctx, len(parts))
     sent, notes = [], []
@@ -190,7 +226,14 @@ async def send_message(
                   'link_preview_options': None if link_preview else {'is_disabled': True}}
         if i == 0 and reply_to_message_id:
             params['reply_parameters'] = {'message_id': reply_to_message_id, 'allow_sending_without_reply': True}
-        msg, note = await _send_text(token, params)
+        try:
+            msg, note = await _send_text(token, params)
+        except ToolError as e:
+            # Telegram measures after parsing markup; if it still says too long, fall back to a file.
+            if len(parts) == 1 and long_text == 'document' and 'too long' in str(e).lower():
+                return await _send_long_as_document(ctx, token, chat, text, format, silent, reply_to_message_id,
+                                                    filename)
+            raise
         sent.append(_sent(msg))
         if note:
             notes.append(f'Part {i + 1}: {note}' if len(parts) > 1 else note)

@@ -53,6 +53,9 @@ class Stub(BaseHTTPRequestHandler):
             if params.get('parse_mode') == 'HTML' and '<b>' in params.get('text', '') and '</b>' not in params['text']:
                 return self.reply({'ok': False, 'error_code': 400,
                                    'description': "Bad Request: can't parse entities: unclosed tag"}, 400)
+            text = params.get('text', '')
+            if method == 'sendMessage' and (len(text.encode('utf-16-le')) // 2 > 4096 or 'TOOLONG' in text):
+                return self.reply({'ok': False, 'error_code': 400, 'description': 'Bad Request: message is too long'}, 400)
             return self.reply({'ok': True, 'result': {'message_id': len(CALLS), 'date': 1763370000}})
         if method == 'getUpdates':
             offset = params.get('offset')
@@ -147,12 +150,38 @@ def test_send_message_goes_to_the_header_chat_only():
     assert 'parse_mode' not in params
 
 
-def test_long_text_is_split():
+def test_long_text_is_split_when_asked():
     text = ('line of text\n' * 700).strip()
-    out = body(run('send_message', {'text': text}))
+    out = body(run('send_message', {'text': text, 'long_text': 'split'}))
     assert out['parts'] == 3
-    assert all(len(p['text']) <= telegram.TEXT_LIMIT for _, p in CALLS)
+    assert all(telegram.tg_len(p['text']) <= telegram.TEXT_LIMIT for _, p in CALLS)
     assert '\n'.join(p['text'] for _, p in CALLS) == text
+
+
+def test_long_text_is_sent_as_a_file_by_default():
+    text = 'Weekly report\n' + 'detail line\n' * 400
+    out = body(run('send_message', {'text': text}))
+    assert out['sent_as'] == 'document' and out['file_name'] == 'message.txt'
+    (method, params), = CALLS
+    raw = params['_multipart']
+    assert method == 'sendDocument' and text.encode() in raw and b'text/plain; charset=utf-8' in raw
+    assert 'Weekly report\n\n(Full text in the file'.encode() in raw
+    body(run('send_message', {'text': text, 'format': 'html', 'filename': 'report'}))
+    assert b'filename="report.html"' in CALLS[0][1]['_multipart']
+
+
+def test_emoji_count_double_toward_the_limit():
+    text = '😀' * 2100            # 2100 characters but 4200 UTF-16 units: over the limit
+    assert len(text) < telegram.TEXT_LIMIT < telegram.tg_len(text)
+    assert body(run('send_message', {'text': text}))['sent_as'] == 'document'
+    out = body(run('send_message', {'text': text, 'long_text': 'split'}))
+    assert out['parts'] == 2 and all(telegram.tg_len(p['text']) <= telegram.TEXT_LIMIT for _, p in CALLS)
+
+
+def test_too_long_after_markup_falls_back_to_a_file():
+    out = body(run('send_message', {'text': 'TOOLONG short raw text', 'format': 'html'}))
+    assert out['sent_as'] == 'document'
+    assert [m for m, _ in CALLS] == ['sendMessage', 'sendDocument']
 
 
 def test_bad_markup_falls_back_to_plain():

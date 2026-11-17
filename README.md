@@ -45,6 +45,13 @@ one of the MCP tokens from the server's `.env`.
 `https://<your host>/mcp`, and the three headers above. Connectors reach your server from the
 internet, so it needs a public HTTPS address.
 
+**Several bots or chats in one client:** `/mcp/<anything>` is the same endpoint as `/mcp`, for
+example `https://<your host>/mcp/alerts` and `https://<your host>/mcp/inbox-monitor`. Add one
+connector per URL, each with its own bot token and chat ID, where a client accepts only one
+connector per URL. The suffix is one or more path segments of letters, digits and `- _ . ~`, up to
+128 characters in all. It is only a name, answered in place (no redirect), and every alias needs an
+MCP token like `/mcp`. A `#` fragment cannot do this: clients never send it to the server.
+
 **Claude Code:**
 
 ```sh

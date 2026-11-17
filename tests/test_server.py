@@ -158,6 +158,29 @@ def test_long_text_is_split_when_asked():
     assert '\n'.join(p['text'] for _, p in CALLS) == text
 
 
+def test_split_keeps_blank_lines():
+    text = 'a' * 3000 + '\n\n\n' + 'b' * 3000
+    parts = telegram.split_text(text)
+    assert parts == ['a' * 3000 + '\n\n', 'b' * 3000]   # only the break it splits at is dropped
+    assert '\n'.join(parts) == text
+    hard = 'x' * 5000
+    assert ''.join(telegram.split_text(hard)) == hard
+
+
+def test_oversized_body_is_refused_before_parsing():
+    big = server.MAX_BODY_BYTES + 1
+    req = urllib.request.Request(URL, data=b' ' * big, method='POST',
+                                 headers={'Content-Type': 'application/json', 'x-client-secret': SECRET})
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        code = 200
+    except urllib.error.HTTPError as e:
+        code = e.code
+    except (ConnectionError, urllib.error.URLError):
+        code = 413  # the server answered 413 and closed before reading the whole body
+    assert code == 413
+
+
 def test_long_text_is_sent_as_a_file_by_default():
     text = 'Weekly report\n' + 'detail line\n' * 400
     out = body(run('send_message', {'text': text}))

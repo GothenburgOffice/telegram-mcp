@@ -165,12 +165,13 @@ def split_text(text: str, limit: int = TEXT_LIMIT) -> list[str]:
     parts = []
     while tg_len(text) > limit:
         end = fit(text, limit)
+        sep = 1  # drop only the one line break or space the split happens at; keep blank lines
         cut = text.rfind('\n', 0, end)
         if cut < end // 2:
             cut = text.rfind(' ', 0, end)
         if cut < end // 2:
-            cut = end
+            cut, sep = end, 0
         parts.append(text[:cut])
-        text = text[cut:].lstrip('\n')
+        text = text[cut + sep:]
     parts.append(text)
     return parts

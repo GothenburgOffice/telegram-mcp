@@ -410,6 +410,27 @@ async def health(request: Request) -> Response:
     return JSONResponse({'status': 'ok', 'version': VERSION, 'configured': bool(MCP_TOKENS)})
 
 
+# Largest request body: a base64 file of MAX_UPLOAD_MB (4/3 of it), or send_message's 1,000,000 characters
+# JSON-escaped (up to 6 bytes each), plus room for the rest of the JSON-RPC message.
+MAX_BODY_BYTES = max(tg.MAX_UPLOAD_BYTES * 4 // 3, 6_000_000) + 1024 * 1024
+
+
+def _limited(receive):
+    """Wrap an ASGI receive so a chunked body over MAX_BODY_BYTES ends as a client disconnect."""
+    seen = 0
+
+    async def wrapped():
+        nonlocal seen
+        message = await receive()
+        if message['type'] == 'http.request':
+            seen += len(message.get('body', b''))
+            if seen > MAX_BODY_BYTES:
+                return {'type': 'http.disconnect'}
+        return message
+
+    return wrapped
+
+
 def build_app():
     hosts = ['127.0.0.1:*', 'localhost:*']
     origins = ['http://127.0.0.1:*', 'http://localhost:*']
@@ -435,6 +456,13 @@ def build_app():
                 await JSONResponse({'error': f'unauthorized: send {SECRET_HEADER}: <token>'}, status_code=401)(
                     scope, receive, send)
                 return
+            # Cap the body before the MCP stack reads and parses it (base64 files, long text).
+            length = headers.get('content-length', '')
+            if length.isdigit() and int(length) > MAX_BODY_BYTES:
+                await JSONResponse({'error': f'request too large (max {MAX_BODY_BYTES // (1024 * 1024)} MB)'},
+                                   status_code=413)(scope, receive, send)
+                return
+            receive = _limited(receive)
         await inner(scope, receive, send)
 
     return guarded

@@ -96,18 +96,18 @@ URL = f'http://127.0.0.1:{app_port}/mcp'
 GOOD = {'x-client-secret': SECRET, 'x-application-key': BOT, 'x-application-id': CHAT}
 
 
-async def _call(tool, args, headers):
+async def _call(tool, args, headers, url=None):
     async with create_mcp_http_client(headers=headers) as http, \
-            streamable_http_client(URL, http_client=http) as (r, w), ClientSession(r, w) as s:
+            streamable_http_client(url or URL, http_client=http) as (r, w), ClientSession(r, w) as s:
         await s.initialize()
         if tool is None:
             return await s.list_tools()
         return await s.call_tool(tool, args)
 
 
-def run(tool, args=None, headers=None):
+def run(tool, args=None, headers=None, url=None):
     CALLS.clear()
-    return asyncio.run(_call(tool, args or {}, GOOD if headers is None else headers))
+    return asyncio.run(_call(tool, args or {}, GOOD if headers is None else headers, url))
 
 
 def body(result):
@@ -120,8 +120,9 @@ def error(result):
     return result.content[0].text
 
 
-def status_without(headers):
-    req = urllib.request.Request(URL, data=b'{}', headers={'Content-Type': 'application/json', **headers}, method='POST')
+def status_without(headers, url=None):
+    req = urllib.request.Request(url or URL, data=b'{}', headers={'Content-Type': 'application/json', **headers},
+                                 method='POST')
     try:
         return urllib.request.urlopen(req, timeout=5).status
     except urllib.error.HTTPError as e:
@@ -136,6 +137,24 @@ def test_mcp_needs_one_of_the_tokens():
     assert names == {'send_message', 'send_photo', 'send_document', 'get_replies', 'connection_status'}
     # The second token and the Authorization header work too.
     assert run(None, headers={'Authorization': 'Bearer other-secret'}).tools
+
+
+def test_mcp_suffix_aliases_are_the_same_endpoint():
+    base = f'http://127.0.0.1:{app_port}'
+    for suffix in ('/mcp/inbox', '/mcp/hkarn/monitor', '/mcp/a.b_c~d-1/'):
+        names = {t.name for t in run(None, url=base + suffix).tools}
+        assert 'send_message' in names, suffix
+        assert status_without({}, base + suffix) == 401, suffix  # still needs a token
+    out = body(run('send_message', {'text': 'via alias'}, url=base + '/mcp/inbox'))
+    assert out['parts'] == 1
+    (method, params), = CALLS
+    assert method == 'sendMessage' and params['chat_id'] == CHAT
+
+
+def test_other_paths_are_not_aliases():
+    base = f'http://127.0.0.1:{app_port}'
+    for path in ('/mcpx', '/mcp/a%20b', '/mcp//x', '/mcp/x/../y', '/mcp/' + 'a' * 130, '/other/mcp'):
+        assert status_without({'x-client-secret': SECRET}, base + path) == 404, path
 
 
 def test_health_is_open():

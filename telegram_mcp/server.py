@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -431,6 +432,22 @@ def _limited(receive):
     return wrapped
 
 
+# /mcp/<anything> is the same endpoint as /mcp. A connector URL with its own suffix (/mcp/inbox,
+# /mcp/hkarn/alerts) lets one client hold several connections to this server, each with its own
+# bot token and chat in its headers, where the client allows only one connector per URL. Served in
+# place, never redirected: MCP clients POST, and many do not follow redirects for that.
+MCP_ALIAS = re.compile(r'/mcp/[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*/?')
+MCP_ALIAS_MAX = 128
+
+
+def _canonical(scope):
+    path = scope.get('path', '')
+    if (len(path) <= MCP_ALIAS_MAX and MCP_ALIAS.fullmatch(path)
+            and not any(part in ('.', '..') for part in path.split('/'))):
+        return dict(scope, path='/mcp', raw_path=b'/mcp')
+    return scope
+
+
 def build_app():
     hosts = ['127.0.0.1:*', 'localhost:*']
     origins = ['http://127.0.0.1:*', 'http://localhost:*']
@@ -446,6 +463,8 @@ def build_app():
     )
 
     async def guarded(scope, receive, send):
+        if scope['type'] == 'http':
+            scope = _canonical(scope)
         # Everything except /health needs one of the server's MCP tokens.
         if scope['type'] == 'http' and scope['path'] != '/health':
             if not MCP_TOKENS:

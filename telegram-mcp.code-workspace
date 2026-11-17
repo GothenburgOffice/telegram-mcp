@@ -1,0 +1,18 @@
+{
+  "folders": [{ "name": "telegram-mcp", "path": "." }],
+  "settings": {
+    "files.eol": "\n",
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true,
+    "editor.tabSize": 2,
+    "files.exclude": { "**/node_modules": true },
+    "search.exclude": { "**/node_modules": true }
+  },
+  "extensions": {
+    "recommendations": ["anthropic.claude-code", "github.vscode-github-actions"]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": []
+  }
+}

@@ -4,6 +4,7 @@ A remote MCP server (streamable HTTP) that lets Claude, or any MCP client, send 
 and files to **one Telegram chat** through **your own bot**, and read the replies. It works in
 every Claude surface through a custom connector.
 
+Can be run remote for easy access from different cloud environments. But not hosted for you, the cost of Telegram messages is nothing and the abuse risk to great without proper user handling.
 You run it yourself: a ready-built image is published on GHCR (see [Install](#install)). Only
 you can use your server, because every request needs an MCP token you set in its `.env`.
 
